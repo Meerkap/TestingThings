@@ -11,19 +11,27 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
+import java.util.function.Consumer;
 
 public class PaginatedInventoryManager {
     private final TestingIdeas plugin;
     private final Mercado mercado;
+    private final UUID propietario;
     private final int itemsPerPage;
     private int currentPage = 0;
     private Inventory ventana;
     private Player viewer;
 
-    public PaginatedInventoryManager(TestingIdeas plugin, Mercado mercado, int itemsPerPage) {
+    public PaginatedInventoryManager(TestingIdeas plugin, Mercado mercado, int itemsPerPage, UUID propietario) {
         this.plugin = plugin;
         this.mercado = mercado;
         this.itemsPerPage = itemsPerPage;
+        this.propietario = propietario;
+    }
+
+    public UUID getPropietario() {
+        return propietario;
     }
 
     public void setPage(int page) {
@@ -38,32 +46,42 @@ public class PaginatedInventoryManager {
 
     // Crea y construye el inventario para la página actual
     private Inventory buildInventory(Player p) {
-        List<ItemEnVenta> todos = mercado.getTodos();
+        String nombreProp = Bukkit.getOfflinePlayer(propietario).getName();
         InventoryBuilder b = InventoryBuilder.of(InventoryType.CHEST)
                 .size(54)
-                .title("Mercado Global")
-                .holder(new MercadoHolder(p.getUniqueId(), "global"))
+                .title("Mercado de " + nombreProp)
+                .holder(new MercadoHolder(propietario, "personal"))
                 .cancelAllClicks();
 
+        List<ItemEnVenta> todos = mercado.getTodos();
         int start = currentPage * itemsPerPage;
         for (int i = 0; i < itemsPerPage && start + i < todos.size(); i++) {
             ItemEnVenta iv = todos.get(start + i);
             b.item(i, crearItemVisual(iv))
                     .onClick(i, e -> {
                         if (iv.getVendedor().equals(p.getUniqueId())) {
+                            // Retirar tu propio ítem
                             mercado.comprar(iv).ifPresent(item -> {
                                 p.getInventory().addItem(item.getItem());
                                 p.sendMessage("§aHas retirado tu ítem del mercado.");
-                                open(p); // Refrescar el inventario
-                                plugin.getService().notificarCambio(item);
+                                open(p);
+                                plugin.getService().notificarCambio(propietario, item);
                             });
                         } else {
-                            abrirMenuConfirmacion(p, iv.getItem(), iv.getPrecioUnitario(), plugin);
+                            // Abrir confirmación, pasando callback
+                            abrirMenuConfirmacion(p, iv, precio -> {
+                                mercado.comprar(iv).ifPresent(item2 -> {
+                                    p.getInventory().addItem(item2.getItem());
+                                    p.sendMessage("§a¡Has comprado el ítem por §e" + precio + "§a!");
+                                    plugin.getService().notificarCambio(propietario, item2);
+                                    p.closeInventory();
+                                });
+                            });
                         }
                     });
         }
 
-        // Flecha anterior (slot 45)
+        // Flecha anterior
         if (currentPage > 0) {
             ItemStack prev = new ItemStack(Material.ARROW);
             ItemMeta pm = prev.getItemMeta();
@@ -75,7 +93,7 @@ public class PaginatedInventoryManager {
             });
         }
 
-        // Flecha siguiente (slot 53)
+        // Flecha siguiente
         if ((currentPage + 1) * itemsPerPage < todos.size()) {
             ItemStack next = new ItemStack(Material.ARROW);
             ItemMeta nm = next.getItemMeta();
@@ -87,8 +105,38 @@ public class PaginatedInventoryManager {
             });
         }
 
-        // Botones de navegación se podrían agregar aquí (ej. slots 45 y 53)
         return b.build(plugin);
+    }
+
+    // -- abrirMenuConfirmacion con callback --
+    private void abrirMenuConfirmacion(Player jugador, ItemEnVenta iv, Consumer<Double> onConfirm) {
+        InventoryBuilder builder = InventoryBuilder.of(InventoryType.CHEST)
+                .size(27)
+                .title("Confirmar Compra")
+                .cancelAllClicks();
+
+        // Ítem en el centro
+        builder.item(13, crearItemVisual(iv));
+
+        double precio = iv.getPrecioUnitario();
+
+        // Botón Confirmar
+        ItemStack confirmar = new ItemStack(Material.LIME_WOOL);
+        ItemMeta cm = confirmar.getItemMeta();
+        cm.setDisplayName("§aConfirmar Compra (§e" + precio + "§a)");
+        confirmar.setItemMeta(cm);
+        builder.item(11, confirmar).onClick(11, e -> {
+            onConfirm.accept(precio);
+        });
+
+        // Botón Cancelar
+        ItemStack cancelar = new ItemStack(Material.BARRIER);
+        ItemMeta xm = cancelar.getItemMeta();
+        xm.setDisplayName("§cCancelar");
+        cancelar.setItemMeta(xm);
+        builder.item(15, cancelar).onClick(15, e -> jugador.closeInventory());
+
+        jugador.openInventory(builder.build(plugin));
     }
 
     // Refresca los ítems visibles sin cerrar el inventario

@@ -9,30 +9,40 @@ import java.util.UUID;
 
 public class MercadoService {
     private final TestingIdeas plugin;
-    private final Mercado mercado;
+    // Mercados por propietario
+    private final Map<UUID, Mercado> mercados = new HashMap<>();
+    // Sesiones abiertas: cada viewer tiene su PaginatedInventoryManager
     private final Map<UUID, PaginatedInventoryManager> sesiones = new HashMap<>();
 
-    public MercadoService(TestingIdeas plugin, Mercado mercado) {
+    public MercadoService(TestingIdeas plugin) {
         this.plugin = plugin;
-        this.mercado = mercado;
     }
 
-    // Abre una sesión del mercado para un jugador en una página específica
-    public void abrirMercado(Player p, int pagina) {
+    // Obtiene o crea el Mercado de éste propietario
+    public Mercado getMercado(UUID propietario) {
+        return mercados.computeIfAbsent(propietario, id -> new Mercado());
+    }
+
+    // Abre una sesión del mercado 'propietario' para el jugador 'p'
+    public void abrirMercado(Player p, UUID propietario, int pagina) {
+        Mercado mercadoPropio = getMercado(propietario);
         PaginatedInventoryManager mgr = sesiones.computeIfAbsent(
-                p.getUniqueId(), id -> new PaginatedInventoryManager(plugin, mercado, 45)
+                p.getUniqueId(),
+                id -> new PaginatedInventoryManager(plugin, mercadoPropio, 45, propietario)
         );
         mgr.setPage(pagina);
         mgr.open(p);
     }
 
-    // Cierra la sesión del jugador
-    public void cerrarSesion(UUID id) {
-        sesiones.remove(id);
+    public void cerrarSesion(UUID viewerId) {
+        sesiones.remove(viewerId);
     }
 
-    // Notifica a todos los viewers que hubo un cambio (para refrescar sus inventarios)
-    public void notificarCambio(ItemEnVenta mod) {
-        sesiones.values().forEach(PaginatedInventoryManager::refresh);
+    // Notifica sólo a las sesiones cuyo manager sea de ese mercado
+    public void notificarCambio(UUID propietario, ItemEnVenta mod) {
+        sesiones.values().stream()
+                .filter(mgr -> mgr.getPropietario().equals(propietario))
+                .forEach(mgr -> mgr.refresh());
     }
 }
+

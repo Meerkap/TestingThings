@@ -20,41 +20,52 @@ public class ComandoMercado implements CommandExecutor {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        // Solo jugadores pueden usar este comando
         if (!(sender instanceof Player)) {
             sender.sendMessage("§cEste comando solo puede usarse en el juego.");
             return true;
         }
-
         Player jugador = (Player) sender;
 
-        if(args.length > 0) {
-            if(args[0].equalsIgnoreCase("stock")) {
-                Bukkit.broadcastMessage("añadimos stock");
-                agregarItemsDePrueba(jugador.getUniqueId());
-                return true;
-            }
+        // Debug stock
+        if (args.length==1 && args[0].equalsIgnoreCase("stock")) {
+            agregarItemsDePrueba(jugador.getUniqueId());
+            return true;
         }
 
-        // Página inicial por defecto
+        // Determinar propietario del mercado a abrir
+        UUID propietario = jugador.getUniqueId();
         int pagina = 0;
 
-        // Si el jugador pone un número, lo usamos como página
-        if (args.length > 0) {
-            try {
-                pagina = Integer.parseInt(args[0]) - 1; // Convertir de 1-based a 0-based
-                if (pagina < 0) pagina = 0;
-            } catch (NumberFormatException e) {
-                jugador.sendMessage("§cLa página debe ser un número.");
-                return true;
+        if (args.length >= 1) {
+            // ¿es un jugador online?
+            Player target = Bukkit.getPlayerExact(args[0]);
+            if (target != null) {
+                propietario = target.getUniqueId();
+                // ¿hay un segundo arg para página?
+                if (args.length >= 2) {
+                    pagina = parsePagina(args[1], jugador);
+                    if (pagina < 0) return true;
+                }
+            } else {
+                // si no existía como jugador, pruebo a parsear página
+                pagina = parsePagina(args[0], jugador);
+                if (pagina < 0) return true;
             }
         }
 
-        // Abrir mercado
-        mercadoService.abrirMercado(jugador, pagina);
+        mercadoService.abrirMercado(jugador, propietario, pagina);
         return true;
     }
 
+    private int parsePagina(String s, Player jugador) {
+        try {
+            int p = Integer.parseInt(s) - 1;
+            return Math.max(p, 0);
+        } catch (NumberFormatException e) {
+            jugador.sendMessage("§cLa página debe ser un número válido.");
+            return -1;
+        }
+    }
 
     private void agregarItemsDePrueba(UUID uniqueId) {
         org.bukkit.Material[] materiales = org.bukkit.Material.values();
@@ -63,7 +74,7 @@ public class ComandoMercado implements CommandExecutor {
         for (int i = 0; i < 300; i++) { // 100 ítems para probar varias páginas
             org.bukkit.inventory.ItemStack item = new org.bukkit.inventory.ItemStack(materiales[i % materiales.length], rand.nextInt(5) + 1);// vendedor ficticio
             double precio = (rand.nextDouble() * 100.0);
-            plugin.getMercado().agregar(new ItemEnVenta(item, uniqueId, precio));
+            plugin.getService().getMercado(uniqueId).agregar(new ItemEnVenta(item, uniqueId, precio));
         }
     }
 
